@@ -31,6 +31,12 @@ class ImageCropApp:
         self.drag_start_canvas = None
         self.selection_rect_id = None
 
+        # output 预览相关
+        self.output_preview_window = None
+        self.output_images = []
+        self.output_page = 0
+        self.output_thumbs = []
+
         self.status_var = tk.StringVar(value="请选择一张参考图片后进行框选。")
         self.coord_var = tk.StringVar(value="当前坐标：未选择")
         self.file_var = tk.StringVar(value="参考图片：未加载")
@@ -44,6 +50,7 @@ class ImageCropApp:
         tk.Button(top_frame, text="加载参考图片", command=self.load_image, width=14).pack(side=tk.LEFT, padx=5)
         tk.Button(top_frame, text="清除选区", command=self.clear_selection, width=10).pack(side=tk.LEFT, padx=5)
         tk.Button(top_frame, text="批量裁剪 input", command=self.batch_crop, width=16).pack(side=tk.LEFT, padx=5)
+        tk.Button(top_frame, text="预览 output", command=self.open_output_preview, width=14).pack(side=tk.LEFT, padx=5)
 
         tk.Label(top_frame, textvariable=self.coord_var, anchor="w").pack(side=tk.LEFT, padx=20)
 
@@ -196,6 +203,12 @@ class ImageCropApp:
             if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
         ])
 
+    def get_output_images(self):
+        return sorted([
+            p for p in self.output_dir.iterdir()
+            if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
+        ])
+
     def batch_crop(self):
         if self.crop_rect_original is None:
             messagebox.showwarning("未选择区域", "请先加载参考图片并框选裁剪区域。")
@@ -244,6 +257,99 @@ class ImageCropApp:
             )
         else:
             messagebox.showinfo("处理完成", summary)
+
+    # -------- output 预览 --------
+    def open_output_preview(self):
+        images = self.get_output_images()
+        if not images:
+            messagebox.showinfo("没有输出文件", f"output 目录为空：\n{self.output_dir}")
+            return
+
+        if self.output_preview_window and tk.Toplevel.winfo_exists(self.output_preview_window):
+            self.output_preview_window.lift()
+        else:
+            self.output_preview_window = tk.Toplevel(self.master)
+            self.output_preview_window.title("Output 预览（每页10张）")
+            self.output_preview_window.geometry("1100x700")
+            self.output_preview_window.protocol(
+                "WM_DELETE_WINDOW", self.close_output_preview
+            )
+
+            self.preview_container = tk.Frame(self.output_preview_window)
+            self.preview_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+            nav_frame = tk.Frame(self.output_preview_window)
+            nav_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+            self.page_info_var = tk.StringVar(value="")
+            tk.Button(nav_frame, text="上一页", command=self.prev_output_page, width=10).pack(side=tk.LEFT, padx=5)
+            tk.Button(nav_frame, text="下一页", command=self.next_output_page, width=10).pack(side=tk.LEFT, padx=5)
+            tk.Label(nav_frame, textvariable=self.page_info_var).pack(side=tk.LEFT, padx=15)
+
+        self.output_images = images
+        self.output_page = 0
+        self.render_output_page()
+
+    def close_output_preview(self):
+        if self.output_preview_window:
+            self.output_preview_window.destroy()
+            self.output_preview_window = None
+
+    def render_output_page(self):
+        if not (self.output_preview_window and tk.Toplevel.winfo_exists(self.output_preview_window)):
+            return
+
+        for widget in self.preview_container.winfo_children():
+            widget.destroy()
+        self.output_thumbs.clear()
+
+        page_size = 10
+        total = len(self.output_images)
+        start = self.output_page * page_size
+        end = min(start + page_size, total)
+        current = self.output_images[start:end]
+
+        # 网格 5 列，2 行
+        cols = 5
+        thumb_size = (200, 200)
+        for idx, img_path in enumerate(current):
+            row = idx // cols
+            col = idx % cols
+            frame = tk.Frame(self.preview_container, bd=1, relief=tk.SOLID, padx=4, pady=4)
+            frame.grid(row=row, column=col, padx=6, pady=6, sticky="nsew")
+
+            try:
+                with Image.open(img_path) as im:
+                    im.thumbnail(thumb_size)
+                    thumb = ImageTk.PhotoImage(im)
+            except Exception as exc:
+                thumb = None
+                err_label = tk.Label(frame, text=f"无法加载\n{img_path.name}\n{exc}", fg="red", justify=tk.LEFT)
+                err_label.pack()
+                continue
+
+            self.output_thumbs.append(thumb)
+            tk.Label(frame, image=thumb).pack()
+            tk.Label(frame, text=img_path.name, wraplength=190, justify=tk.LEFT).pack()
+
+        for i in range(2):
+            self.preview_container.rowconfigure(i, weight=1)
+        for j in range(cols):
+            self.preview_container.columnconfigure(j, weight=1)
+
+        total_pages = (total + page_size - 1) // page_size
+        self.page_info_var.set(f"第 {self.output_page + 1} / {max(total_pages,1)} 页，共 {total} 张")
+
+    def prev_output_page(self):
+        if self.output_page > 0:
+            self.output_page -= 1
+            self.render_output_page()
+
+    def next_output_page(self):
+        page_size = 10
+        total_pages = (len(self.output_images) + page_size - 1) // page_size
+        if self.output_page + 1 < total_pages:
+            self.output_page += 1
+            self.render_output_page()
 
 
 def main():
