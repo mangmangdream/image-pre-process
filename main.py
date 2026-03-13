@@ -2,6 +2,8 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 from pathlib import Path
 from PIL import Image, ImageTk
+import oracledb
+import datetime
 
 SUPPORTED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff", ".webp"}
 MAX_PREVIEW_SIZE = (1000, 700)
@@ -51,6 +53,7 @@ class ImageCropApp:
         tk.Button(top_frame, text="清除选区", command=self.clear_selection, width=10).pack(side=tk.LEFT, padx=5)
         tk.Button(top_frame, text="批量裁剪 input", command=self.batch_crop, width=16).pack(side=tk.LEFT, padx=5)
         tk.Button(top_frame, text="预览 output", command=self.open_output_preview, width=14).pack(side=tk.LEFT, padx=5)
+        tk.Button(top_frame, text="上传到数据库", command=self.upload_to_db, width=14).pack(side=tk.LEFT, padx=5)
 
         tk.Label(top_frame, textvariable=self.coord_var, anchor="w").pack(side=tk.LEFT, padx=20)
 
@@ -280,10 +283,10 @@ class ImageCropApp:
 
             nav_frame = tk.Frame(self.output_preview_window)
             nav_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
-            self.page_info_var = tk.StringVar(value="")
-            tk.Button(nav_frame, text="上一页", command=self.prev_output_page, width=10).pack(side=tk.LEFT, padx=5)
-            tk.Button(nav_frame, text="下一页", command=self.next_output_page, width=10).pack(side=tk.LEFT, padx=5)
-            tk.Label(nav_frame, textvariable=self.page_info_var).pack(side=tk.LEFT, padx=15)
+        self.page_info_var = tk.StringVar(value="")
+        tk.Button(nav_frame, text="上一页", command=self.prev_output_page, width=10).pack(side=tk.LEFT, padx=5)
+        tk.Button(nav_frame, text="下一页", command=self.next_output_page, width=10).pack(side=tk.LEFT, padx=5)
+        tk.Label(nav_frame, textvariable=self.page_info_var).pack(side=tk.LEFT, padx=15)
 
         self.output_images = images
         self.output_page = 0
@@ -350,6 +353,31 @@ class ImageCropApp:
         if self.output_page + 1 < total_pages:
             self.output_page += 1
             self.render_output_page()
+
+    def upload_to_db(self):
+        images = self.get_output_images()
+        if not images:
+            messagebox.showwarning("没有输出文件", f"output 目录为空：\n{self.output_dir}")
+            return
+
+        try:
+            with oracledb.connect("apax/lab@localhost:1521/labdb") as conn:
+                cursor = conn.cursor()
+                for img_path in images:
+                    with open(img_path, "rb") as f:
+                        blob_data = f.read()
+                    created = datetime.datetime.now()
+                    cursor.execute(
+                        """
+                        INSERT INTO SM_POSTS (FILE_BLOB, FILE_NAME, CREATED)
+                        VALUES (:1, :2, :3)
+                        """,
+                        [blob_data, img_path.name, created],
+                    )
+                conn.commit()
+                messagebox.showinfo("上传完成", f"成功上传 {len(images)} 张图片到 SM_POSTS 表。")
+        except oracledb.Error as exc:
+            messagebox.showerror("数据库错误", f"上传失败：{exc}")
 
 
 def main():
