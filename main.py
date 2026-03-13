@@ -5,9 +5,15 @@ from PIL import Image, ImageTk
 import oracledb
 import datetime
 import json
+import os
+import sys
 
 SUPPORTED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff", ".webp"}
 MAX_PREVIEW_SIZE = (1000, 700)
+
+if sys.platform == "darwin":
+    os.environ["TK_SILENCE_DEPRECATION"] = "1"
+    os.environ["OBJC_DISABLE_INITIALIZE_FORK_SAFETY"] = "YES"
 
 
 class ImageCropApp:

@@ -54,3 +54,4 @@ python main.py
 - 预览窗口分页 10 张，网格 5x2，可翻页查看
 - 输出文件添加 "cropped_" 前缀便于识别
 - 上传功能使用 oracledb，从 db_config.json 读取连接配置（user, password, dsn），插入 SM_POSTS 表；需确保数据库访问权限和配置文件正确
+- macOS 用户：程序添加环境变量抑制 Tkinter 警告（如 NSOpenPanel override 和 mach port error），不影响功能
