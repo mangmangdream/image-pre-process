@@ -51,4 +51,4 @@ python main.py
 - 如果某张图片尺寸比参考图小，程序会自动按当前图片边界裁剪
 - 如果裁剪区域在某张图片上无有效交集，该图片会被记录为失败
 - 预览窗口分页 10 张，网格 5x2，可翻页查看
-- 上传功能使用 oracledb 连接 apax/oracle@localhost:1521/labdb，插入 SM_POSTS 表；需确保数据库访问权限
+- 上传功能使用 oracledb，从 db_config.json 读取连接配置（user, password, dsn），插入 SM_POSTS 表；需确保数据库访问权限和配置文件正确
