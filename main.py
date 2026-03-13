@@ -44,6 +44,10 @@ class ImageCropApp:
         self.coord_var = tk.StringVar(value="当前坐标：未选择")
         self.file_var = tk.StringVar(value="参考图片：未加载")
 
+        # 上传目录，默认 input
+        self.upload_dir = self.input_dir
+        self.upload_dir_var = tk.StringVar(value=f"上传目录：{self.upload_dir}")
+
         self._build_ui()
 
     def _build_ui(self):
@@ -55,12 +59,14 @@ class ImageCropApp:
         tk.Button(top_frame, text="批量裁剪 input", command=self.batch_crop, width=16).pack(side=tk.LEFT, padx=5)
         tk.Button(top_frame, text="预览 output", command=self.open_output_preview, width=14).pack(side=tk.LEFT, padx=5)
         tk.Button(top_frame, text="上传到数据库", command=self.upload_to_db, width=14).pack(side=tk.LEFT, padx=5)
+        tk.Button(top_frame, text="选择上传目录", command=self.select_upload_dir, width=14).pack(side=tk.LEFT, padx=5)
 
         tk.Label(top_frame, textvariable=self.coord_var, anchor="w").pack(side=tk.LEFT, padx=20)
 
         info_frame = tk.Frame(self.master)
         info_frame.pack(fill=tk.X, padx=10)
         tk.Label(info_frame, textvariable=self.file_var, anchor="w").pack(fill=tk.X)
+        tk.Label(info_frame, textvariable=self.upload_dir_var, anchor="w").pack(fill=tk.X)
         tk.Label(info_frame, textvariable=self.status_var, anchor="w", fg="blue").pack(fill=tk.X, pady=(4, 8))
 
         self.canvas = tk.Canvas(self.master, bg="#f0f0f0", width=1200, height=720, cursor="cross")
@@ -213,6 +219,15 @@ class ImageCropApp:
             if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
         ])
 
+    def select_upload_dir(self):
+        dir_path = filedialog.askdirectory(
+            title="选择上传目录",
+            initialdir=str(self.upload_dir),
+        )
+        if dir_path:
+            self.upload_dir = Path(dir_path)
+            self.upload_dir_var.set(f"上传目录：{self.upload_dir}")
+
     def batch_crop(self):
         if self.crop_rect_original is None:
             messagebox.showwarning("未选择区域", "请先加载参考图片并框选裁剪区域。")
@@ -356,9 +371,12 @@ class ImageCropApp:
             self.render_output_page()
 
     def upload_to_db(self):
-        images = self.get_output_images()
+        images = sorted([
+            p for p in self.upload_dir.iterdir()
+            if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
+        ])
         if not images:
-            messagebox.showwarning("没有输出文件", f"output 目录为空：\n{self.output_dir}")
+            messagebox.showwarning("没有文件", f"选择的上传目录为空：\n{self.upload_dir}")
             return
 
         config_path = self.project_dir / "db_config.json"

@@ -10,7 +10,7 @@
 - 对 `input` 目录下所有图片应用相同裁剪区域
 - 将结果输出到 `output` 目录
 - 预览 `output/` 目录下的图片，分页显示（每页 10 张）
-- 上传 `output/` 图片到 Oracle 数据库 SM_POSTS 表（FILE_BLOB, FILE_NAME, CREATED）
+- 上传选择的目录（默认 input/）中图片到 Oracle 数据库 SM_POSTS 表（FILE_BLOB, FILE_NAME, CREATED）
 
 ## 目录结构
 
@@ -43,7 +43,8 @@ python main.py
 5. 点击“批量裁剪 input”
 6. 在 `output/` 目录查看结果
 7. 点击“预览 output”可分页预览输出图片（每页 10 张，支持翻页）
-8. 点击“上传到数据库”将 output 图片上传到 SM_POSTS 表
+8. （可选）点击“选择上传目录”修改上传源（默认 input/）
+9. 点击“上传到数据库”上传选择的目录中图片到 SM_POSTS 表
 
 ## 说明
 
