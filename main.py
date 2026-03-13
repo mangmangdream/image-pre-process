@@ -260,7 +260,7 @@ class ImageCropApp:
                     if crop_box[2] <= crop_box[0] or crop_box[3] <= crop_box[1]:
                         raise ValueError("裁剪区域超出当前图片范围，无法生成有效结果")
                     cropped = img.crop(crop_box)
-                    output_path = self.output_dir / image_path.name
+                    output_path = self.output_dir / ("cropped_" + image_path.name)
                     cropped.save(output_path)
                     success_count += 1
             except Exception as exc:
