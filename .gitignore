@@ -2,3 +2,5 @@ __pycache__/
 output/
 .DS_Store
 db_config.json
+input/
+output/
