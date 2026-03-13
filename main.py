@@ -361,7 +361,7 @@ class ImageCropApp:
             return
 
         try:
-            with oracledb.connect("apax/lab@localhost:1521/labdb") as conn:
+            with oracledb.connect("apax/oracle@localhost:1521/labdb") as conn:
                 cursor = conn.cursor()
                 for img_path in images:
                     with open(img_path, "rb") as f:
