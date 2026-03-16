@@ -7,6 +7,7 @@ import datetime
 import json
 import os
 import sys
+import customtkinter as ctk
 
 SUPPORTED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff", ".webp"}
 MAX_PREVIEW_SIZE = (1000, 700)
@@ -17,7 +18,10 @@ if sys.platform == "darwin":
 
 
 class ImageCropApp:
-    def __init__(self, master: tk.Tk):
+    def __init__(self, master: ctk.CTk):
+        ctk.set_appearance_mode("System")  # "dark" 或 "light"
+        ctk.set_default_color_theme("blue")
+
         self.master = master
         self.master.title("Image Pre Process - Batch Crop")
         self.master.geometry("1280x860")
@@ -57,34 +61,59 @@ class ImageCropApp:
         self._build_ui()
 
     def _build_ui(self):
-        top_frame = tk.Frame(self.master)
-        top_frame.pack(fill=tk.X, padx=10, pady=10)
+        # 主框架
+        main_frame = ctk.CTkFrame(self.master)
+        main_frame.pack(fill=ctk.BOTH, expand=True, padx=10, pady=10)
 
-        tk.Button(top_frame, text="加载参考图片", command=self.load_image, width=14).pack(side=tk.LEFT, padx=5)
-        tk.Button(top_frame, text="清除选区", command=self.clear_selection, width=10).pack(side=tk.LEFT, padx=5)
-        tk.Button(top_frame, text="批量裁剪 input", command=self.batch_crop, width=16).pack(side=tk.LEFT, padx=5)
-        tk.Button(top_frame, text="预览 output", command=self.open_output_preview, width=14).pack(side=tk.LEFT, padx=5)
-        tk.Button(top_frame, text="上传到数据库", command=self.upload_to_db, width=14).pack(side=tk.LEFT, padx=5)
-        tk.Button(top_frame, text="选择上传目录", command=self.select_upload_dir, width=14).pack(side=tk.LEFT, padx=5)
+        # 左侧侧边栏
+        sidebar = ctk.CTkFrame(main_frame, width=200, corner_radius=10)
+        sidebar.pack(side="left", fill="y", padx=(0, 10), pady=0)
 
-        tk.Label(top_frame, textvariable=self.coord_var, anchor="w").pack(side=tk.LEFT, padx=20)
+        # 文件操作组
+        file_group = ctk.CTkFrame(sidebar, corner_radius=8)
+        file_group.pack(fill="x", padx=10, pady=(10, 5))
+        ctk.CTkLabel(file_group, text="文件操作", font=("Arial", 14, "bold")).pack(pady=5)
+        ctk.CTkButton(file_group, text="📁 加载参考图片", command=self.load_image, corner_radius=8, height=40).pack(fill="x", padx=5, pady=2)
+        ctk.CTkButton(file_group, text="📂 选择上传目录", command=self.select_upload_dir, corner_radius=8, height=40).pack(fill="x", padx=5, pady=2)
 
-        info_frame = tk.Frame(self.master)
-        info_frame.pack(fill=tk.X, padx=10)
-        tk.Label(info_frame, textvariable=self.file_var, anchor="w").pack(fill=tk.X)
-        tk.Label(info_frame, textvariable=self.upload_dir_var, anchor="w").pack(fill=tk.X)
-        tk.Label(info_frame, textvariable=self.status_var, anchor="w", fg="blue").pack(fill=tk.X, pady=(4, 8))
+        # 裁剪操作组
+        crop_group = ctk.CTkFrame(sidebar, corner_radius=8)
+        crop_group.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(crop_group, text="裁剪操作", font=("Arial", 14, "bold")).pack(pady=5)
+        ctk.CTkButton(crop_group, text="🗑️ 清除选区", command=self.clear_selection, corner_radius=8, height=40).pack(fill="x", padx=5, pady=2)
+        ctk.CTkButton(crop_group, text="✂️ 批量裁剪 input", command=self.batch_crop, corner_radius=8, height=40).pack(fill="x", padx=5, pady=2)
 
-        self.canvas = tk.Canvas(self.master, bg="#f0f0f0", width=1200, height=720, cursor="cross")
-        self.canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # 预览和上传组
+        preview_group = ctk.CTkFrame(sidebar, corner_radius=8)
+        preview_group.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(preview_group, text="预览与上传", font=("Arial", 14, "bold")).pack(pady=5)
+        ctk.CTkButton(preview_group, text="👁️ 预览 output", command=self.open_output_preview, corner_radius=8, height=40).pack(fill="x", padx=5, pady=2)
+        ctk.CTkButton(preview_group, text="⬆️ 上传到数据库", command=self.upload_to_db, corner_radius=8, height=40).pack(fill="x", padx=5, pady=2)
+
+        # 右侧工作区
+        workspace = ctk.CTkFrame(main_frame, corner_radius=10)
+        workspace.pack(side="right", fill="both", expand=True)
+
+        # 信息面板
+        info_frame = ctk.CTkFrame(workspace, corner_radius=8)
+        info_frame.pack(fill="x", pady=(0, 10))
+        ctk.CTkLabel(info_frame, textvariable=self.file_var, anchor="w").pack(fill="x", padx=10, pady=2)
+        ctk.CTkLabel(info_frame, textvariable=self.upload_dir_var, anchor="w").pack(fill="x", padx=10, pady=2)
+        ctk.CTkLabel(info_frame, textvariable=self.coord_var, anchor="w").pack(fill="x", padx=10, pady=2)
+        ctk.CTkLabel(info_frame, textvariable=self.status_var, anchor="w", text_color="blue").pack(fill="x", padx=10, pady=2)
+
+        # Canvas 区域
+        self.canvas = tk.Canvas(workspace, bg="#f0f0f0", cursor="cross", highlightthickness=0)
+        self.canvas.pack(fill="both", expand=True, padx=10, pady=10)
         self.canvas.bind("<ButtonPress-1>", self.on_mouse_down)
         self.canvas.bind("<B1-Motion>", self.on_mouse_drag)
         self.canvas.bind("<ButtonRelease-1>", self.on_mouse_up)
 
+        # 帮助文本
         help_text = (
             "使用说明：1. 点击“加载参考图片” 2. 鼠标拖拽框选裁剪区域 3. 点击“批量裁剪 input”处理 input 目录下所有图片，结果输出到 output 目录。"
         )
-        tk.Label(self.master, text=help_text, anchor="w", justify=tk.LEFT, fg="#444").pack(fill=tk.X, padx=10, pady=(0, 10))
+        ctk.CTkLabel(workspace, text=help_text, anchor="w", justify="left", text_color="#444").pack(fill="x", padx=10, pady=(0, 10))
 
     def load_image(self):
         path = filedialog.askopenfilename(
@@ -290,25 +319,26 @@ class ImageCropApp:
             messagebox.showinfo("没有输出文件", f"output 目录为空：\n{self.output_dir}")
             return
 
-        if self.output_preview_window and tk.Toplevel.winfo_exists(self.output_preview_window):
+        if self.output_preview_window and self.output_preview_window.winfo_exists():
             self.output_preview_window.lift()
         else:
-            self.output_preview_window = tk.Toplevel(self.master)
+            self.output_preview_window = ctk.CTkToplevel(self.master)
             self.output_preview_window.title("Output 预览（每页10张）")
             self.output_preview_window.geometry("1100x700")
             self.output_preview_window.protocol(
                 "WM_DELETE_WINDOW", self.close_output_preview
             )
 
-            self.preview_container = tk.Frame(self.output_preview_window)
-            self.preview_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+            self.preview_container = ctk.CTkFrame(self.output_preview_window)
+            self.preview_container.pack(fill=ctk.BOTH, expand=True, padx=10, pady=10)
 
-            nav_frame = tk.Frame(self.output_preview_window)
-            nav_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
-        self.page_info_var = tk.StringVar(value="")
-        tk.Button(nav_frame, text="上一页", command=self.prev_output_page, width=10).pack(side=tk.LEFT, padx=5)
-        tk.Button(nav_frame, text="下一页", command=self.next_output_page, width=10).pack(side=tk.LEFT, padx=5)
-        tk.Label(nav_frame, textvariable=self.page_info_var).pack(side=tk.LEFT, padx=15)
+            nav_frame = ctk.CTkFrame(self.output_preview_window)
+            nav_frame.pack(fill="x", padx=10, pady=(0, 10))
+
+            self.page_info_var = tk.StringVar(value="")
+            ctk.CTkButton(nav_frame, text="上一页", command=self.prev_output_page, width=120).pack(side="left", padx=5)
+            ctk.CTkButton(nav_frame, text="下一页", command=self.next_output_page, width=120).pack(side="left", padx=5)
+            ctk.CTkLabel(nav_frame, textvariable=self.page_info_var).pack(side="left", padx=15)
 
         self.output_images = images
         self.output_page = 0
@@ -320,7 +350,7 @@ class ImageCropApp:
             self.output_preview_window = None
 
     def render_output_page(self):
-        if not (self.output_preview_window and tk.Toplevel.winfo_exists(self.output_preview_window)):
+        if not (self.output_preview_window and self.output_preview_window.winfo_exists()):
             return
 
         for widget in self.preview_container.winfo_children():
@@ -339,7 +369,7 @@ class ImageCropApp:
         for idx, img_path in enumerate(current):
             row = idx // cols
             col = idx % cols
-            frame = tk.Frame(self.preview_container, bd=1, relief=tk.SOLID, padx=4, pady=4)
+            frame = ctk.CTkFrame(self.preview_container, corner_radius=8, border_width=1)
             frame.grid(row=row, column=col, padx=6, pady=6, sticky="nsew")
 
             try:
@@ -348,13 +378,13 @@ class ImageCropApp:
                     thumb = ImageTk.PhotoImage(im)
             except Exception as exc:
                 thumb = None
-                err_label = tk.Label(frame, text=f"无法加载\n{img_path.name}\n{exc}", fg="red", justify=tk.LEFT)
+                err_label = ctk.CTkLabel(frame, text=f"无法加载\n{img_path.name}\n{exc}", text_color="red")
                 err_label.pack()
                 continue
 
             self.output_thumbs.append(thumb)
-            tk.Label(frame, image=thumb).pack()
-            tk.Label(frame, text=img_path.name, wraplength=190, justify=tk.LEFT).pack()
+            ctk.CTkLabel(frame, image=thumb).pack()
+            ctk.CTkLabel(frame, text=img_path.name, wraplength=190).pack()
 
         for i in range(2):
             self.preview_container.rowconfigure(i, weight=1)
@@ -413,7 +443,7 @@ class ImageCropApp:
 
 
 def main():
-    root = tk.Tk()
+    root = ctk.CTk()
     app = ImageCropApp(root)
     root.update_idletasks()
     app.render_image()
