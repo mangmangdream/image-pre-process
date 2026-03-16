@@ -231,9 +231,9 @@ class ImageCropApp:
         self.coord_var.set("当前坐标：未选择")
         if self.preview_image is not None:
             self.render_image()
+            self.canvas.update()
         if update_status:
             self.status_var.set("已清除选区。")
-
     def _point_in_preview(self, x, y):
         if self.preview_image is None:
             return False
