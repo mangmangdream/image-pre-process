@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 from pathlib import Path
 from PIL import Image, ImageTk
 import oracledb
@@ -10,6 +10,12 @@ import sys
 import threading
 
 SUPPORTED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff", ".webp"}
+APP_BG = "#eef3f9"
+CARD_BG = "#ffffff"
+ACCENT = "#0f766e"
+ACCENT_HOVER = "#0b5f59"
+TEXT_PRIMARY = "#0f172a"
+TEXT_SECONDARY = "#475569"
 
 if sys.platform == "darwin":
     os.environ["TK_SILENCE_DEPRECATION"] = "1"
@@ -21,6 +27,8 @@ class ImageCropApp:
         self.master = master
         self.master.title("Image Pre Process - Batch Crop")
         self.master.geometry("1280x860")
+        self.master.minsize(1120, 760)
+        self.master.configure(bg=APP_BG)
 
         self.project_dir = Path(__file__).resolve().parent
         self.input_dir = self.project_dir / "input"
@@ -59,25 +67,116 @@ class ImageCropApp:
         self.upload_dir_var = tk.StringVar(value=f"上传目录：{self.upload_dir}")
         self.task_running = False
         self.action_buttons = []
+        self.busy_buttons = []
+        self.task_progress = None
+        self.load_request_id = 0
 
+        self._init_styles()
         self._build_ui()
 
-    def _build_ui(self):
-        top_frame = tk.Frame(self.master)
-        top_frame.pack(fill=tk.X, padx=10, pady=10)
+    def _init_styles(self):
+        style = ttk.Style(self.master)
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
 
-        self.btn_load = tk.Button(top_frame, text="加载参考图片", command=self.load_image, width=14)
-        self.btn_load.pack(side=tk.LEFT, padx=5)
-        self.btn_clear = tk.Button(top_frame, text="清除选区", command=self.clear_selection, width=10)
-        self.btn_clear.pack(side=tk.LEFT, padx=5)
-        self.btn_batch_crop = tk.Button(top_frame, text="批量裁剪 input", command=self.batch_crop, width=16)
-        self.btn_batch_crop.pack(side=tk.LEFT, padx=5)
-        self.btn_preview = tk.Button(top_frame, text="预览 output", command=self.open_output_preview, width=14)
-        self.btn_preview.pack(side=tk.LEFT, padx=5)
-        self.btn_upload = tk.Button(top_frame, text="上传到数据库", command=self.upload_to_db, width=14)
-        self.btn_upload.pack(side=tk.LEFT, padx=5)
-        self.btn_select_upload_dir = tk.Button(top_frame, text="选择上传目录", command=self.select_upload_dir, width=14)
-        self.btn_select_upload_dir.pack(side=tk.LEFT, padx=5)
+        style.configure("App.TFrame", background=APP_BG)
+        style.configure("Card.TFrame", background=CARD_BG, relief="flat")
+        style.configure("Title.TLabel", background=APP_BG, foreground=TEXT_PRIMARY, font=("PingFang SC", 20, "bold"))
+        style.configure("Subtitle.TLabel", background=APP_BG, foreground=TEXT_SECONDARY, font=("PingFang SC", 11))
+        style.configure("CardTitle.TLabel", background=CARD_BG, foreground=TEXT_PRIMARY, font=("PingFang SC", 12, "bold"))
+        style.configure("MetaTitle.TLabel", background=CARD_BG, foreground=TEXT_SECONDARY, font=("PingFang SC", 10))
+        style.configure("MetaValue.TLabel", background=CARD_BG, foreground=TEXT_PRIMARY, font=("PingFang SC", 10))
+        style.configure("Help.TLabel", background=CARD_BG, foreground=TEXT_SECONDARY, font=("PingFang SC", 10))
+        style.configure("Status.TLabel", background=CARD_BG, foreground="#0c4a6e", font=("PingFang SC", 10))
+
+        style.configure(
+            "Primary.TButton",
+            font=("PingFang SC", 10, "bold"),
+            foreground="#ffffff",
+            background=ACCENT,
+            borderwidth=0,
+            padding=(12, 9),
+        )
+        style.map(
+            "Primary.TButton",
+            background=[("active", ACCENT_HOVER), ("disabled", "#95c5bf")],
+            foreground=[("disabled", "#eaf7f5")],
+        )
+
+        style.configure(
+            "Secondary.TButton",
+            font=("PingFang SC", 10),
+            foreground=TEXT_PRIMARY,
+            background="#e2e8f0",
+            borderwidth=0,
+            padding=(10, 8),
+        )
+        style.map(
+            "Secondary.TButton",
+            background=[("active", "#cbd5e1"), ("disabled", "#edf2f7")],
+            foreground=[("disabled", "#94a3b8")],
+        )
+
+        style.configure(
+            "Accent.Horizontal.TProgressbar",
+            troughcolor="#dbe6f2",
+            background=ACCENT,
+            bordercolor="#dbe6f2",
+            lightcolor=ACCENT,
+            darkcolor=ACCENT,
+        )
+
+    def _create_card(self, parent, title: str):
+        card = ttk.Frame(parent, style="Card.TFrame", padding=14)
+        ttk.Label(card, text=title, style="CardTitle.TLabel").pack(anchor="w", pady=(0, 8))
+        body = ttk.Frame(card, style="Card.TFrame")
+        body.pack(fill=tk.BOTH, expand=True)
+        return card, body
+
+    def _build_ui(self):
+        app_frame = ttk.Frame(self.master, style="App.TFrame", padding=16)
+        app_frame.pack(fill=tk.BOTH, expand=True)
+
+        header = ttk.Frame(app_frame, style="App.TFrame")
+        header.pack(fill=tk.X, pady=(0, 10))
+        ttk.Label(header, text="Image Pre Process", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(
+            header,
+            text="批量裁剪与上传工具 · 现代化工作台",
+            style="Subtitle.TLabel",
+        ).pack(anchor="w", pady=(2, 0))
+
+        content = ttk.Panedwindow(app_frame, orient=tk.HORIZONTAL)
+        content.pack(fill=tk.BOTH, expand=True)
+
+        left_panel = ttk.Frame(content, style="App.TFrame", padding=(0, 0, 12, 0), width=330)
+        left_panel.pack_propagate(False)
+        right_panel = ttk.Frame(content, style="App.TFrame")
+        content.add(left_panel, weight=1)
+        content.add(right_panel, weight=4)
+
+        controls_card, controls_body = self._create_card(left_panel, "快捷操作")
+        controls_card.pack(fill=tk.X, pady=(0, 12))
+
+        self.btn_load = ttk.Button(controls_body, text="加载参考图片", command=self.load_image, style="Secondary.TButton")
+        self.btn_load.pack(fill=tk.X, pady=(0, 8))
+        self.btn_clear = ttk.Button(controls_body, text="清除选区", command=self.clear_selection, style="Secondary.TButton")
+        self.btn_clear.pack(fill=tk.X, pady=(0, 8))
+        self.btn_batch_crop = ttk.Button(controls_body, text="批量裁剪 input", command=self.batch_crop, style="Primary.TButton")
+        self.btn_batch_crop.pack(fill=tk.X, pady=(0, 8))
+        self.btn_preview = ttk.Button(controls_body, text="预览 output", command=self.open_output_preview, style="Secondary.TButton")
+        self.btn_preview.pack(fill=tk.X, pady=(0, 8))
+        self.btn_select_upload_dir = ttk.Button(
+            controls_body,
+            text="选择上传目录",
+            command=self.select_upload_dir,
+            style="Secondary.TButton",
+        )
+        self.btn_select_upload_dir.pack(fill=tk.X, pady=(0, 8))
+        self.btn_upload = ttk.Button(controls_body, text="上传到数据库", command=self.upload_to_db, style="Primary.TButton")
+        self.btn_upload.pack(fill=tk.X)
 
         self.action_buttons = [
             self.btn_load,
@@ -87,27 +186,46 @@ class ImageCropApp:
             self.btn_upload,
             self.btn_select_upload_dir,
         ]
+        self.busy_buttons = [
+            self.btn_batch_crop,
+            self.btn_upload,
+        ]
 
-        tk.Label(top_frame, textvariable=self.coord_var, anchor="w").pack(side=tk.LEFT, padx=20)
+        info_card, info_body = self._create_card(left_panel, "任务信息")
+        info_card.pack(fill=tk.X, pady=(0, 12))
+        ttk.Label(info_body, text="参考图片", style="MetaTitle.TLabel").pack(anchor="w")
+        ttk.Label(info_body, textvariable=self.file_var, style="MetaValue.TLabel", wraplength=280).pack(anchor="w", fill=tk.X, pady=(2, 8))
+        ttk.Label(info_body, text="上传目录", style="MetaTitle.TLabel").pack(anchor="w")
+        ttk.Label(info_body, textvariable=self.upload_dir_var, style="MetaValue.TLabel", wraplength=280).pack(anchor="w", fill=tk.X, pady=(2, 8))
+        ttk.Label(info_body, text="当前坐标", style="MetaTitle.TLabel").pack(anchor="w")
+        ttk.Label(info_body, textvariable=self.coord_var, style="MetaValue.TLabel", wraplength=280).pack(anchor="w", fill=tk.X, pady=(2, 0))
 
-        info_frame = tk.Frame(self.master)
-        info_frame.pack(fill=tk.X, padx=10)
-        tk.Label(info_frame, textvariable=self.file_var, anchor="w").pack(fill=tk.X)
-        tk.Label(info_frame, textvariable=self.upload_dir_var, anchor="w").pack(fill=tk.X)
-        tk.Label(info_frame, textvariable=self.status_var, anchor="w", fg="blue").pack(fill=tk.X, pady=(4, 8))
+        help_card, help_body = self._create_card(left_panel, "操作提示")
+        help_card.pack(fill=tk.BOTH, expand=True)
+        help_text = "1. 加载参考图\n2. 在画布拖拽选区\n3. 批量裁剪 input\n4. 预览 output 或上传数据库"
+        ttk.Label(help_body, text=help_text, style="Help.TLabel", justify=tk.LEFT).pack(anchor="w")
 
-        self.canvas = tk.Canvas(self.master, bg="#f0f0f0", width=1200, height=720, cursor="cross")
-        self.canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        canvas_card, canvas_body = self._create_card(right_panel, "裁剪画布")
+        canvas_card.pack(fill=tk.BOTH, expand=True)
+        canvas_wrapper = tk.Frame(canvas_body, bg=CARD_BG)
+        canvas_wrapper.pack(fill=tk.BOTH, expand=True)
+
+        self.canvas = tk.Canvas(canvas_wrapper, bg="#e2e8f0", width=1200, height=720, cursor="cross", highlightthickness=0)
+        self.canvas.pack(fill=tk.BOTH, expand=True)
         self.canvas.bind("<ButtonPress-1>", self.on_mouse_down)
         self.canvas.bind("<B1-Motion>", self.on_mouse_drag)
         self.canvas.bind("<ButtonRelease-1>", self.on_mouse_up)
+        self.canvas.bind("<Configure>", self._on_canvas_resize)
 
-        help_text = (
-            "使用说明：1. 点击“加载参考图片” 2. 鼠标拖拽框选裁剪区域 3. 点击“批量裁剪 input”处理 input 目录下所有图片，结果输出到 output 目录。"
-        )
-        tk.Label(self.master, text=help_text, anchor="w", justify=tk.LEFT, fg="#444").pack(fill=tk.X, padx=10, pady=(0, 10))
+        status_bar = ttk.Frame(canvas_body, style="Card.TFrame")
+        status_bar.pack(fill=tk.X, pady=(10, 0))
+        self.task_progress = ttk.Progressbar(status_bar, mode="indeterminate", length=120, style="Accent.Horizontal.TProgressbar")
+        self.task_progress.pack(side=tk.LEFT)
+        ttk.Label(status_bar, textvariable=self.status_var, style="Status.TLabel").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 0))
 
     def load_image(self):
+        self.load_request_id += 1
+        current_request_id = self.load_request_id
         path = filedialog.askopenfilename(
             title="选择参考图片",
             filetypes=[
@@ -119,20 +237,38 @@ class ImageCropApp:
         if not path:
             return
 
+        self.status_var.set("正在加载参考图片...")
+        worker = threading.Thread(
+            target=self._load_image_worker,
+            args=(path, current_request_id),
+            daemon=True,
+        )
+        worker.start()
+
+    def _load_image_worker(self, path: str, request_id: int):
         try:
             image = Image.open(path)
             image.load()
+            self.master.after(0, self._on_load_image_done, Path(path), image, request_id)
         except Exception as exc:
-            messagebox.showerror("加载失败", f"无法打开图片：{exc}")
-            return
+            self.master.after(0, self._on_load_image_failed, str(exc), request_id)
 
-        self.current_image_path = Path(path)
+    def _on_load_image_done(self, image_path: Path, image: Image.Image, request_id: int):
+        if request_id != self.load_request_id:
+            return
+        self.current_image_path = image_path
         self.original_image = image
         self.crop_rect_original = None
         self.file_var.set(f"参考图片：{self.current_image_path}")
         self.status_var.set("图片已加载，请在预览区域拖拽选择裁剪范围。")
         self.coord_var.set("当前坐标：未选择")
         self.render_image()
+
+    def _on_load_image_failed(self, error_text: str, request_id: int):
+        if request_id != self.load_request_id:
+            return
+        self.status_var.set("加载失败，请重试。")
+        messagebox.showerror("加载失败", f"无法打开图片：{error_text}")
 
     def render_image(self):
         if self.original_image is None:
@@ -257,14 +393,23 @@ class ImageCropApp:
             self.master.after_cancel(self.render_after_id)
         self.render_after_id = self.master.after(120, self._render_image_after_resize)
 
+    def _on_canvas_resize(self, _event):
+        if self.original_image is not None:
+            self.schedule_render_image()
+
     def _render_image_after_resize(self):
         self.render_after_id = None
         self.render_image()
 
     def _set_task_running(self, running: bool, status_text: str | None = None):
         self.task_running = running
-        for button in self.action_buttons:
+        for button in self.busy_buttons:
             button.configure(state=(tk.DISABLED if running else tk.NORMAL))
+        if self.task_progress is not None:
+            if running:
+                self.task_progress.start(10)
+            else:
+                self.task_progress.stop()
         self.canvas.configure(cursor=("watch" if running else "cross"))
         if status_text is not None:
             self.status_var.set(status_text)
@@ -367,19 +512,20 @@ class ImageCropApp:
             self.output_preview_window = tk.Toplevel(self.master)
             self.output_preview_window.title("Output 预览（每页10张）")
             self.output_preview_window.geometry("1100x700")
+            self.output_preview_window.configure(bg=APP_BG)
             self.output_preview_window.protocol(
                 "WM_DELETE_WINDOW", self.close_output_preview
             )
 
-            self.preview_container = tk.Frame(self.output_preview_window)
+            self.preview_container = ttk.Frame(self.output_preview_window, style="Card.TFrame", padding=10)
             self.preview_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-            self.output_nav_frame = tk.Frame(self.output_preview_window)
+            self.output_nav_frame = ttk.Frame(self.output_preview_window, style="Card.TFrame", padding=10)
             self.output_nav_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
 
-            tk.Button(self.output_nav_frame, text="上一页", command=self.prev_output_page, width=10).pack(side=tk.LEFT, padx=5)
-            tk.Button(self.output_nav_frame, text="下一页", command=self.next_output_page, width=10).pack(side=tk.LEFT, padx=5)
-            tk.Label(self.output_nav_frame, textvariable=self.page_info_var).pack(side=tk.LEFT, padx=15)
+            ttk.Button(self.output_nav_frame, text="上一页", command=self.prev_output_page, style="Secondary.TButton").pack(side=tk.LEFT, padx=5)
+            ttk.Button(self.output_nav_frame, text="下一页", command=self.next_output_page, style="Secondary.TButton").pack(side=tk.LEFT, padx=5)
+            ttk.Label(self.output_nav_frame, textvariable=self.page_info_var, style="MetaValue.TLabel").pack(side=tk.LEFT, padx=15)
 
         self.output_images = images
         self.output_page = 0
@@ -412,7 +558,7 @@ class ImageCropApp:
         for idx, img_path in enumerate(current):
             row = idx // cols
             col = idx % cols
-            frame = tk.Frame(self.preview_container, bd=1, relief=tk.SOLID, padx=4, pady=4)
+            frame = tk.Frame(self.preview_container, bd=0, relief=tk.FLAT, bg=CARD_BG, padx=6, pady=6)
             frame.grid(row=row, column=col, padx=6, pady=6, sticky="nsew")
 
             try:
@@ -421,13 +567,13 @@ class ImageCropApp:
                     thumb = ImageTk.PhotoImage(im)
             except Exception as exc:
                 thumb = None
-                err_label = tk.Label(frame, text=f"无法加载\n{img_path.name}\n{exc}", fg="red", justify=tk.LEFT)
+                err_label = tk.Label(frame, text=f"无法加载\n{img_path.name}\n{exc}", fg="#b91c1c", bg=CARD_BG, justify=tk.LEFT)
                 err_label.pack()
                 continue
 
             self.output_thumbs.append(thumb)
-            tk.Label(frame, image=thumb).pack()
-            tk.Label(frame, text=img_path.name, wraplength=190, justify=tk.LEFT).pack()
+            tk.Label(frame, image=thumb, bg=CARD_BG).pack()
+            tk.Label(frame, text=img_path.name, wraplength=190, justify=tk.LEFT, bg=CARD_BG, fg=TEXT_PRIMARY).pack()
 
         for i in range(2):
             self.preview_container.rowconfigure(i, weight=1)
@@ -522,7 +668,6 @@ def main():
     app = ImageCropApp(root)
     root.update_idletasks()
     app.render_image()
-    root.bind("<Configure>", lambda event: app.schedule_render_image() if app.original_image else None)
     root.mainloop()
 
 
