@@ -7,9 +7,9 @@ import datetime
 import json
 import os
 import sys
+import threading
 
 SUPPORTED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff", ".webp"}
-MAX_PREVIEW_SIZE = (1000, 700)
 
 if sys.platform == "darwin":
     os.environ["TK_SILENCE_DEPRECATION"] = "1"
@@ -42,9 +42,13 @@ class ImageCropApp:
 
         # output 预览相关
         self.output_preview_window = None
+        self.preview_container = None
+        self.output_nav_frame = None
+        self.page_info_var = tk.StringVar(value="")
         self.output_images = []
         self.output_page = 0
         self.output_thumbs = []
+        self.render_after_id = None
 
         self.status_var = tk.StringVar(value="请选择一张参考图片后进行框选。")
         self.coord_var = tk.StringVar(value="当前坐标：未选择")
@@ -53,6 +57,8 @@ class ImageCropApp:
         # 上传目录，默认 input
         self.upload_dir = self.input_dir
         self.upload_dir_var = tk.StringVar(value=f"上传目录：{self.upload_dir}")
+        self.task_running = False
+        self.action_buttons = []
 
         self._build_ui()
 
@@ -60,12 +66,27 @@ class ImageCropApp:
         top_frame = tk.Frame(self.master)
         top_frame.pack(fill=tk.X, padx=10, pady=10)
 
-        tk.Button(top_frame, text="加载参考图片", command=self.load_image, width=14).pack(side=tk.LEFT, padx=5)
-        tk.Button(top_frame, text="清除选区", command=self.clear_selection, width=10).pack(side=tk.LEFT, padx=5)
-        tk.Button(top_frame, text="批量裁剪 input", command=self.batch_crop, width=16).pack(side=tk.LEFT, padx=5)
-        tk.Button(top_frame, text="预览 output", command=self.open_output_preview, width=14).pack(side=tk.LEFT, padx=5)
-        tk.Button(top_frame, text="上传到数据库", command=self.upload_to_db, width=14).pack(side=tk.LEFT, padx=5)
-        tk.Button(top_frame, text="选择上传目录", command=self.select_upload_dir, width=14).pack(side=tk.LEFT, padx=5)
+        self.btn_load = tk.Button(top_frame, text="加载参考图片", command=self.load_image, width=14)
+        self.btn_load.pack(side=tk.LEFT, padx=5)
+        self.btn_clear = tk.Button(top_frame, text="清除选区", command=self.clear_selection, width=10)
+        self.btn_clear.pack(side=tk.LEFT, padx=5)
+        self.btn_batch_crop = tk.Button(top_frame, text="批量裁剪 input", command=self.batch_crop, width=16)
+        self.btn_batch_crop.pack(side=tk.LEFT, padx=5)
+        self.btn_preview = tk.Button(top_frame, text="预览 output", command=self.open_output_preview, width=14)
+        self.btn_preview.pack(side=tk.LEFT, padx=5)
+        self.btn_upload = tk.Button(top_frame, text="上传到数据库", command=self.upload_to_db, width=14)
+        self.btn_upload.pack(side=tk.LEFT, padx=5)
+        self.btn_select_upload_dir = tk.Button(top_frame, text="选择上传目录", command=self.select_upload_dir, width=14)
+        self.btn_select_upload_dir.pack(side=tk.LEFT, padx=5)
+
+        self.action_buttons = [
+            self.btn_load,
+            self.btn_clear,
+            self.btn_batch_crop,
+            self.btn_preview,
+            self.btn_upload,
+            self.btn_select_upload_dir,
+        ]
 
         tk.Label(top_frame, textvariable=self.coord_var, anchor="w").pack(side=tk.LEFT, padx=20)
 
@@ -213,19 +234,44 @@ class ImageCropApp:
             and self.offset_y <= y <= self.offset_y + self.preview_image.height
         )
 
-    def get_input_images(self):
+    def _list_images(self, directory: Path):
+        if not directory.exists():
+            raise FileNotFoundError(f"目录不存在：{directory}")
+        if not directory.is_dir():
+            raise NotADirectoryError(f"路径不是目录：{directory}")
         return sorted([
-            p for p in self.input_dir.iterdir()
+            p for p in directory.iterdir()
             if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
         ])
+
+    def get_input_images(self):
+        return self._list_images(self.input_dir)
 
     def get_output_images(self):
-        return sorted([
-            p for p in self.output_dir.iterdir()
-            if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
-        ])
+        return self._list_images(self.output_dir)
+
+    def schedule_render_image(self):
+        if self.original_image is None:
+            return
+        if self.render_after_id is not None:
+            self.master.after_cancel(self.render_after_id)
+        self.render_after_id = self.master.after(120, self._render_image_after_resize)
+
+    def _render_image_after_resize(self):
+        self.render_after_id = None
+        self.render_image()
+
+    def _set_task_running(self, running: bool, status_text: str | None = None):
+        self.task_running = running
+        for button in self.action_buttons:
+            button.configure(state=(tk.DISABLED if running else tk.NORMAL))
+        self.canvas.configure(cursor=("watch" if running else "cross"))
+        if status_text is not None:
+            self.status_var.set(status_text)
 
     def select_upload_dir(self):
+        if self.task_running:
+            return
         dir_path = filedialog.askdirectory(
             title="选择上传目录",
             initialdir=str(self.upload_dir),
@@ -235,57 +281,82 @@ class ImageCropApp:
             self.upload_dir_var.set(f"上传目录：{self.upload_dir}")
 
     def batch_crop(self):
+        if self.task_running:
+            self.status_var.set("已有任务在执行中，请等待完成。")
+            return
         if self.crop_rect_original is None:
             messagebox.showwarning("未选择区域", "请先加载参考图片并框选裁剪区域。")
             return
 
-        images = self.get_input_images()
+        try:
+            images = self.get_input_images()
+        except (FileNotFoundError, NotADirectoryError) as exc:
+            messagebox.showerror("输入目录不可用", str(exc))
+            return
         if not images:
             messagebox.showwarning(
                 "没有输入文件", f"请先将图片放入目录：\n{self.input_dir}"
             )
             return
 
-        x1, y1, x2, y2 = self.crop_rect_original
-        success_count = 0
-        fail_count = 0
-        failures = []
-
         self.output_dir.mkdir(exist_ok=True)
+        self._set_task_running(True, f"批量裁剪执行中，共 {len(images)} 张，请稍候...")
+        crop_rect = self.crop_rect_original
+        worker = threading.Thread(
+            target=self._batch_crop_worker,
+            args=(images, crop_rect),
+            daemon=True,
+        )
+        worker.start()
 
-        for image_path in images:
-            try:
-                with Image.open(image_path) as img:
-                    width, height = img.size
-                    crop_box = (
-                        max(0, min(x1, width)),
-                        max(0, min(y1, height)),
-                        max(0, min(x2, width)),
-                        max(0, min(y2, height)),
-                    )
-                    if crop_box[2] <= crop_box[0] or crop_box[3] <= crop_box[1]:
-                        raise ValueError("裁剪区域超出当前图片范围，无法生成有效结果")
-                    cropped = img.crop(crop_box)
-                    output_path = self.output_dir / ("cropped_" + image_path.name)
-                    cropped.save(output_path)
-                    success_count += 1
-            except Exception as exc:
-                fail_count += 1
-                failures.append(f"{image_path.name}: {exc}")
+    def _batch_crop_worker(self, images, crop_rect):
+        try:
+            x1, y1, x2, y2 = crop_rect
+            success_count = 0
+            failures = []
+            for image_path in images:
+                try:
+                    with Image.open(image_path) as img:
+                        width, height = img.size
+                        crop_box = (
+                            max(0, min(x1, width)),
+                            max(0, min(y1, height)),
+                            max(0, min(x2, width)),
+                            max(0, min(y2, height)),
+                        )
+                        if crop_box[2] <= crop_box[0] or crop_box[3] <= crop_box[1]:
+                            raise ValueError("裁剪区域超出当前图片范围，无法生成有效结果")
+                        cropped = img.crop(crop_box)
+                        output_path = self.output_dir / ("cropped_" + image_path.name)
+                        cropped.save(output_path)
+                        success_count += 1
+                except Exception as exc:
+                    failures.append(f"{image_path.name}: {exc}")
+            self.master.after(0, self._on_batch_crop_done, success_count, failures)
+        except Exception as exc:
+            self.master.after(0, self._on_batch_crop_failed, str(exc))
 
+    def _on_batch_crop_done(self, success_count: int, failures):
+        fail_count = len(failures)
         summary = f"处理完成：成功 {success_count} 张，失败 {fail_count} 张。输出目录：{self.output_dir}"
-        self.status_var.set(summary)
+        self._set_task_running(False, summary)
         if failures:
             detail = "\n".join(failures[:10])
-            messagebox.showwarning(
-                "部分文件处理失败", f"{summary}\n\n{detail}"
-            )
+            messagebox.showwarning("部分文件处理失败", f"{summary}\n\n{detail}")
         else:
             messagebox.showinfo("处理完成", summary)
 
+    def _on_batch_crop_failed(self, error_text: str):
+        self._set_task_running(False, "批量裁剪失败。")
+        messagebox.showerror("批量裁剪失败", f"错误：{error_text}")
+
     # -------- output 预览 --------
     def open_output_preview(self):
-        images = self.get_output_images()
+        try:
+            images = self.get_output_images()
+        except (FileNotFoundError, NotADirectoryError) as exc:
+            messagebox.showerror("输出目录不可用", str(exc))
+            return
         if not images:
             messagebox.showinfo("没有输出文件", f"output 目录为空：\n{self.output_dir}")
             return
@@ -303,12 +374,12 @@ class ImageCropApp:
             self.preview_container = tk.Frame(self.output_preview_window)
             self.preview_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-            nav_frame = tk.Frame(self.output_preview_window)
-            nav_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
-        self.page_info_var = tk.StringVar(value="")
-        tk.Button(nav_frame, text="上一页", command=self.prev_output_page, width=10).pack(side=tk.LEFT, padx=5)
-        tk.Button(nav_frame, text="下一页", command=self.next_output_page, width=10).pack(side=tk.LEFT, padx=5)
-        tk.Label(nav_frame, textvariable=self.page_info_var).pack(side=tk.LEFT, padx=15)
+            self.output_nav_frame = tk.Frame(self.output_preview_window)
+            self.output_nav_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+
+            tk.Button(self.output_nav_frame, text="上一页", command=self.prev_output_page, width=10).pack(side=tk.LEFT, padx=5)
+            tk.Button(self.output_nav_frame, text="下一页", command=self.next_output_page, width=10).pack(side=tk.LEFT, padx=5)
+            tk.Label(self.output_nav_frame, textvariable=self.page_info_var).pack(side=tk.LEFT, padx=15)
 
         self.output_images = images
         self.output_page = 0
@@ -318,6 +389,8 @@ class ImageCropApp:
         if self.output_preview_window:
             self.output_preview_window.destroy()
             self.output_preview_window = None
+            self.preview_container = None
+            self.output_nav_frame = None
 
     def render_output_page(self):
         if not (self.output_preview_window and tk.Toplevel.winfo_exists(self.output_preview_window)):
@@ -377,10 +450,14 @@ class ImageCropApp:
             self.render_output_page()
 
     def upload_to_db(self):
-        images = sorted([
-            p for p in self.upload_dir.iterdir()
-            if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
-        ])
+        if self.task_running:
+            self.status_var.set("已有任务在执行中，请等待完成。")
+            return
+        try:
+            images = self._list_images(self.upload_dir)
+        except (FileNotFoundError, NotADirectoryError) as exc:
+            messagebox.showerror("上传目录不可用", str(exc))
+            return
         if not images:
             messagebox.showwarning("没有文件", f"选择的上传目录为空：\n{self.upload_dir}")
             return
@@ -390,26 +467,54 @@ class ImageCropApp:
             messagebox.showerror("配置缺失", f"请创建 db_config.json 文件：\n{config_path}")
             return
 
+        self._set_task_running(True, f"数据库上传执行中，共 {len(images)} 张，请稍候...")
+        worker = threading.Thread(
+            target=self._upload_to_db_worker,
+            args=(images, config_path),
+            daemon=True,
+        )
+        worker.start()
+
+    def _upload_to_db_worker(self, images, config_path):
         try:
             with open(config_path) as f:
                 config = json.load(f)
             with oracledb.connect(user=config["user"], password=config["password"], dsn=config["dsn"]) as conn:
                 cursor = conn.cursor()
+                uploaded_count = 0
+                failed = []
                 for img_path in images:
-                    with open(img_path, "rb") as f:
-                        blob_data = f.read()
-                    created = datetime.datetime.now()
-                    cursor.execute(
-                        """
-                        INSERT INTO SM_POSTS (FILE_BLOB, FILE_NAME, CREATED)
-                        VALUES (:1, :2, :3)
-                        """,
-                        [blob_data, img_path.name, created],
-                    )
+                    try:
+                        with open(img_path, "rb") as f:
+                            blob_data = f.read()
+                        created = datetime.datetime.now()
+                        cursor.execute(
+                            """
+                            INSERT INTO SM_POSTS (FILE_BLOB, FILE_NAME, CREATED)
+                            VALUES (:1, :2, :3)
+                            """,
+                            [blob_data, img_path.name, created],
+                        )
+                        uploaded_count += 1
+                    except OSError as exc:
+                        failed.append(f"{img_path.name}: {exc}")
                 conn.commit()
-                messagebox.showinfo("上传完成", f"成功上传 {len(images)} 张图片到 SM_POSTS 表。")
-        except (oracledb.Error, json.JSONDecodeError, KeyError) as exc:
-            messagebox.showerror("上传失败", f"错误：{exc}")
+                self.master.after(0, self._on_upload_done, uploaded_count, failed)
+        except Exception as exc:
+            self.master.after(0, self._on_upload_failed, str(exc))
+
+    def _on_upload_done(self, uploaded_count: int, failed):
+        summary = f"上传完成：成功 {uploaded_count} 张，失败 {len(failed)} 张。"
+        self._set_task_running(False, summary)
+        if failed:
+            detail = "\n".join(failed[:10])
+            messagebox.showwarning("部分文件上传失败", f"{summary}\n\n{detail}")
+        else:
+            messagebox.showinfo("上传完成", f"{summary}\n已写入 SM_POSTS 表。")
+
+    def _on_upload_failed(self, error_text: str):
+        self._set_task_running(False, "上传失败。")
+        messagebox.showerror("上传失败", f"错误：{error_text}")
 
 
 def main():
@@ -417,7 +522,7 @@ def main():
     app = ImageCropApp(root)
     root.update_idletasks()
     app.render_image()
-    root.bind("<Configure>", lambda event: app.render_image() if app.original_image else None)
+    root.bind("<Configure>", lambda event: app.schedule_render_image() if app.original_image else None)
     root.mainloop()
 
 
