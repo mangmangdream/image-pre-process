@@ -57,6 +57,8 @@ class ImageCropApp:
         self.output_page = 0
         self.output_thumbs = []
         self.render_after_id = None
+        self.thumb_cache = {}
+        self.thumb_mtime = {}
 
         self.status_var = tk.StringVar(value="请选择一张参考图片后进行框选。")
         self.coord_var = tk.StringVar(value="当前坐标：未选择")
@@ -416,14 +418,20 @@ class ImageCropApp:
 
     def select_upload_dir(self):
         if self.task_running:
+            self.status_var.set("当前有任务在执行，请稍后再选择上传目录。")
             return
-        dir_path = filedialog.askdirectory(
-            title="选择上传目录",
-            initialdir=str(self.upload_dir),
-        )
+        try:
+            dir_path = filedialog.askdirectory(
+                title="选择上传目录",
+                initialdir=str(self.upload_dir),
+            )
+        except Exception as exc:
+            messagebox.showerror("选择目录失败", f"无法打开目录选择窗口：{exc}")
+            return
         if dir_path:
             self.upload_dir = Path(dir_path)
             self.upload_dir_var.set(f"上传目录：{self.upload_dir}")
+            self.status_var.set(f"上传目录已切换到：{self.upload_dir}")
 
     def batch_crop(self):
         if self.task_running:
@@ -537,6 +545,7 @@ class ImageCropApp:
             self.output_preview_window = None
             self.preview_container = None
             self.output_nav_frame = None
+        # 保留缓存便于下次打开快速显示
 
     def render_output_page(self):
         if not (self.output_preview_window and tk.Toplevel.winfo_exists(self.output_preview_window)):
@@ -562,9 +571,17 @@ class ImageCropApp:
             frame.grid(row=row, column=col, padx=6, pady=6, sticky="nsew")
 
             try:
-                with Image.open(img_path) as im:
-                    im.thumbnail(thumb_size)
-                    thumb = ImageTk.PhotoImage(im)
+                mtime = img_path.stat().st_mtime
+                cache_key = str(img_path)
+                cached = self.thumb_cache.get(cache_key)
+                if cached and self.thumb_mtime.get(cache_key) == mtime:
+                    thumb = cached
+                else:
+                    with Image.open(img_path) as im:
+                        im.thumbnail(thumb_size)
+                        thumb = ImageTk.PhotoImage(im)
+                    self.thumb_cache[cache_key] = thumb
+                    self.thumb_mtime[cache_key] = mtime
             except Exception as exc:
                 thumb = None
                 err_label = tk.Label(frame, text=f"无法加载\n{img_path.name}\n{exc}", fg="#b91c1c", bg=CARD_BG, justify=tk.LEFT)
